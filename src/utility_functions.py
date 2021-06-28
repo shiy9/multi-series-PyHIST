@@ -63,7 +63,7 @@ def check_image(slidepath):
         raise TypeError("Unsupported format, or file not found.")
 
 
-def downsample_image(slide, downsampling_factor, mode="numpy"):
+def downsample_image(slide, downsampling_factor, mode="numpy", multi_reg=False, reg_param=None):
     """Downsample an Openslide at a factor.
 
     Takes an OpenSlide SVS object and downsamples the original resolution
@@ -74,6 +74,7 @@ def downsample_image(slide, downsampling_factor, mode="numpy"):
         slide: An OpenSlide object.
         downsampling_factor: Power of 2 to downsample the slide.
         mode: String, either "numpy" or "PIL" to define the output type.
+        multi_reg: Boolean. To indicate whether the slide has multiple regions
 
     Returns:
         img: An RGB numpy array or PIL image, depending on the mode,
@@ -87,14 +88,24 @@ def downsample_image(slide, downsampling_factor, mode="numpy"):
     best_downsampling_level = slide.get_best_level_for_downsample(downsampling_factor + 0.1)
 
     # Get the image at the requested scale
-    svs_native_levelimg = slide.read_region((0, 0), best_downsampling_level, slide.level_dimensions[best_downsampling_level])
-    target_size = tuple([int(x//downsampling_factor) for x in slide.dimensions])
+    # First tuple: (x, y), second: (width, height)
+    if multi_reg:
+        svs_native_levelimg = slide.read_region((reg_param[0], reg_param[1]), 0, (reg_param[2], reg_param[3]))
+        target_size = (reg_param[2] // downsampling_factor, reg_param[3] // downsampling_factor)
+    else:
+        svs_native_levelimg = slide.read_region((0, 0), best_downsampling_level,
+                                                slide.level_dimensions[best_downsampling_level])
+        target_size = tuple([int(x // downsampling_factor) for x in slide.dimensions])
+
     img = svs_native_levelimg.resize(target_size)
 
     # By default, return a numpy array as RGB, otherwise, return PIL image
     if mode == "numpy":
         # Remove the alpha channel
         img = np.array(img.convert("RGB"))
+
+    # To verify the intended region
+    cv2.imwrite("cropped.png", img)
 
     return img, best_downsampling_level
 
@@ -276,3 +287,18 @@ def clean(slide):
             os.remove(slide.img_outpath + "segmented_" + slide.sample_id + ".ppm")
         if not slide.save_edges:
             os.remove(slide.img_outpath + "edges_" + slide.sample_id + ".ppm")
+
+def get_region_param(slide, reg_num):
+    x_coord = int(slide.properties[f'openslide.region[{reg_num}].x'])
+    y_coord = int(slide.properties[f'openslide.region[{reg_num}].y'])
+    width = int(slide.properties[f'openslide.region[{reg_num}].width'])
+    height = int(slide.properties[f'openslide.region[{reg_num}].height'])
+    return [x_coord, y_coord, width, height]
+
+def get_region_param_wrt_tiles(slide, reg_num, dwn_spl, patch_size):
+    tmp_ls = get_region_param(slide, reg_num)
+    x_coord_adj = int(int(np.floor(tmp_ls[0] / dwn_spl / patch_size)) * dwn_spl * patch_size)
+    y_coord_adj = int(int(np.floor(tmp_ls[1] / dwn_spl / patch_size)) * dwn_spl * patch_size)
+    width_adj = int(int(np.ceil((tmp_ls[0] + tmp_ls[2]) / dwn_spl / patch_size)) * dwn_spl * patch_size) - x_coord_adj
+    height_adj = int(int(np.ceil((tmp_ls[1] + tmp_ls[3]) / dwn_spl / patch_size)) * dwn_spl * patch_size) - y_coord_adj
+    return [x_coord_adj, y_coord_adj, width_adj, height_adj]

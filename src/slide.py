@@ -165,6 +165,8 @@ class TileGenerator:
         the selected tile size at the test_downsample resolution. Performed using
         Felzenswalb's efficient graph segmentation.
         """
+        # If slide contains multiple regions
+        multiple_region = self.input_slide.multi_reg
 
         # Check that the segmentation executable is available
         utility_functions.check_compilation()
@@ -177,7 +179,15 @@ class TileGenerator:
         self.__segment_felzenszwalb()
 
         # Get information about arguments and image
-        image_dims = self.input_slide.slide.dimensions  # (x, y) # UNPACK
+        if multiple_region:
+            tmp_ls = utility_functions.get_region_param_wrt_tiles(slide=self.input_slide.slide,
+                                                                  reg_num=self.input_slide.reg_num,
+                                                                  dwn_spl=self.input_slide.output_downsample,
+                                                                  patch_size=self.input_slide.patch_size)
+            image_dims = (tmp_ls[2], tmp_ls[3])
+        else:
+            image_dims = self.input_slide.slide.dimensions  # (x, y) # UNPACK
+
         border_pct = self.input_slide.pct_bc / 100
         border_thickness = 2
 
@@ -253,6 +263,7 @@ class TileGenerator:
         """
 
         # Get downsampled version of the image
+        # TODO: change the downsample here if running otsu
         img, bdl = utility_functions.downsample_image(self.input_slide.slide, self.input_slide.mask_downsample)
 
         # Information
@@ -294,6 +305,7 @@ class TileGenerator:
         """
 
         # Get downsampled version of the image
+        # TODO: change things here, not working for multiple regions
         img, bdl = utility_functions.downsample_image(self.input_slide.slide, self.input_slide.mask_downsample)
 
         # Information
@@ -330,16 +342,31 @@ class TileGenerator:
         ts = time.time()
 
         # Read the image
-        img, bdl = utility_functions.downsample_image(self.input_slide.slide, self.input_slide.mask_downsample)
+        multiple_region = self.input_slide.multi_reg
+        if multiple_region:
+            tmp_ls = utility_functions.get_region_param_wrt_tiles(slide=self.input_slide.slide,
+                                                                  reg_num=self.input_slide.reg_num,
+                                                                  dwn_spl=self.input_slide.output_downsample,
+                                                                  patch_size=self.input_slide.patch_size)
+            img, bdl = utility_functions.downsample_image(self.input_slide.slide, self.input_slide.mask_downsample,
+                                                          multi_reg=self.input_slide.multi_reg,
+                                                          reg_param=tmp_ls)
+        else:
+            img, bdl = utility_functions.downsample_image(self.input_slide.slide, self.input_slide.mask_downsample)
 
         # Logging info
         logging.debug("Requested " + str(self.input_slide.mask_downsample) + "x downsampling for edge detection.")
         logging.debug("SVS level 0 dimensions:" + str(self.input_slide.slide.dimensions))
         logging.debug("Using level " + str(bdl) + " to downsample.")
-        logging.debug("Downsampled size: " + str(img.shape[::-1][1:3]))
+
+        if multiple_region:
+            logging.debug("Cropped downsampled size (w.r.t tiles): " + str(img.shape[::-1][1:3]))
+        else:
+            logging.debug("Downsampled size: " + str(img.shape[::-1][1:3]))
 
         # Run Canny edge detector
-        edges = cv2.Canny(img, 100, 200)
+        # optimal: 150, 200
+        edges = cv2.Canny(img, self.input_slide.canny_low, self.input_slide.canny_high)
 
         # Save the produced image in PPM format to give to the segmentation algorithm
         edges = Image.fromarray(edges)
@@ -390,6 +417,19 @@ class TileGenerator:
 
         ts = time.time()
 
+        multiple_region = self.input_slide.multi_reg
+        if multiple_region:
+            tmp_lst = utility_functions.get_region_param_wrt_tiles(slide=self.input_slide.slide,
+                                                                  reg_num=self.input_slide.reg_num,
+                                                                  dwn_spl=self.input_slide.output_downsample,
+                                                                  patch_size=self.input_slide.patch_size)
+            # tmp_lst = utility_functions.get_region_param(self.input_slide.slide, self.input_slide.reg_num)
+
+            x_coord = tmp_lst[0]
+            y_coord = tmp_lst[1]
+            width = tmp_lst[2]
+            height = tmp_lst[3]
+
         # Create folder for the patches
         if self.input_slide.save_patches:
             self.input_slide._create_tile_folder()
@@ -421,8 +461,20 @@ class TileGenerator:
         if self.input_slide.save_tilecrossed_image:
 
             # Get a downsampled numpy array for the image
-            tilecrossed_img = utility_functions.downsample_image(self.input_slide.slide,
-                self.input_slide.tilecross_downsample, mode="numpy")[0]
+            if multiple_region:
+                tmp_ls = utility_functions.get_region_param_wrt_tiles(slide=self.input_slide.slide,
+                                                                      reg_num=self.input_slide.reg_num,
+                                                                      dwn_spl=self.input_slide.output_downsample,
+                                                                      patch_size=self.input_slide.patch_size)
+                tilecrossed_img = utility_functions.downsample_image(self.input_slide.slide,
+                    self.input_slide.tilecross_downsample,
+                    mode="numpy",
+                    multi_reg=multiple_region,
+                    reg_param=tmp_ls)[0]
+            else:
+                tilecrossed_img = utility_functions.downsample_image(self.input_slide.slide,
+                                                                     self.input_slide.tilecross_downsample,
+                                                                     mode="numpy")[0]
 
             # Calculate patch size in the mask
             tilecross_patchsize = int(np.ceil(self.input_slide.patch_size * (self.input_slide.output_downsample/self.input_slide.tilecross_downsample)))
@@ -466,18 +518,42 @@ class TileGenerator:
 
         logging.info("== Selecting tiles ==")
 
-        if dzgmask_maxtilecoords != dzg_selectedlevel_maxtilecoords:
-            logging.info("Rounding error creates extra patches at the side(s) of the image.")
-            grid_coord = (min(dzgmask_maxtilecoords[0], dzg_selectedlevel_maxtilecoords[0]),
-                min(dzgmask_maxtilecoords[1], dzg_selectedlevel_maxtilecoords[1]))
-            logging.info("Ignoring the image border. Maximum tile coordinates: " + str(grid_coord))
-            n_tiles = grid_coord[0] * grid_coord[1]
+        if multiple_region:
+            grid_coord = dzgmask_maxtilecoords
         else:
-            grid_coord = dzg_selectedlevel_maxtilecoords
+            if dzgmask_maxtilecoords != dzg_selectedlevel_maxtilecoords:
+                logging.info("Rounding error creates extra patches at the side(s) of the image.")
+                grid_coord = (min(dzgmask_maxtilecoords[0], dzg_selectedlevel_maxtilecoords[0]),
+                    min(dzgmask_maxtilecoords[1], dzg_selectedlevel_maxtilecoords[1]))
+                logging.info("Ignoring the image border. Maximum tile coordinates: " + str(grid_coord))
+                n_tiles = grid_coord[0] * grid_coord[1]
+            else:
+                grid_coord = dzg_selectedlevel_maxtilecoords
 
         # Counters
         preds = [0] * n_tiles
-        row, col, i = 0, 0, 0
+
+        if multiple_region:
+            msk_row, msk_col = 0, 0
+            col_init = int(round(x_coord / self.input_slide.output_downsample / self.input_slide.patch_size))
+            col = col_init
+            row = int(round(y_coord / self.input_slide.output_downsample / self.input_slide.patch_size))
+            i = row * dzg_selectedlevel_maxtilecoords[0] + col
+            name_idx = 0
+            tmp_row = msk_row
+            tmp_col = msk_col
+
+            # coordinates saving
+            abs_col = x_coord
+            abs_row = y_coord
+            coord_list = []
+        else:
+            row, col, i = 0, 0, 0
+            tmp_row = row
+            tmp_col = col
+
+            # TODO: add save coordinates function to normal mode?
+
         tile_names = []
         tile_dims_w = []
         tile_dims_h = []
@@ -485,11 +561,16 @@ class TileGenerator:
         tile_cols = []
 
         # Evaluate tiles using the selector function
-        while row < grid_coord[1]:
+        while tmp_row < grid_coord[1]:
 
             # Extract the tile from the mask (the last level is used
             # since the mask is already rescaled)
-            mask_tile = dzgmask.get_tile(dzgmask.level_count - 1, (col, row))
+            # if multiple_region:
+            #     mask_tile = dzgmask.get_tile(dzgmask.level_count - 1, (msk_col, msk_row))
+            # else:
+            #     mask_tile = dzgmask.get_tile(dzgmask.level_count - 1, (col, row))
+
+            mask_tile = dzgmask.get_tile(dzgmask.level_count - 1, (tmp_col, tmp_row))
 
             # Tile converted to BGR
             mask_tile = np.array(mask_tile)
@@ -514,17 +595,33 @@ class TileGenerator:
                 tile_cols.append(col)
 
                 # Save tile
-                imgtile_out = self.input_slide.tile_folder + tile_names[i] + "." + self.input_slide.format
+                if multiple_region:
+                    imgtile_out = self.input_slide.tile_folder + tile_names[name_idx] + "." + self.input_slide.format
+                    # imgtile_out = self.input_slide.tile_folder + f'{self.input_slide.sample_id}_{abs_col}_{abs_row}' + "." + self.input_slide.format
+                else:
+                    imgtile_out = self.input_slide.tile_folder + tile_names[i] + "." + self.input_slide.format
+
                 if self.input_slide.save_blank:
                     tile.save(imgtile_out)
+                    if multiple_region:
+                        coord_list.append([abs_col, abs_row])
                 else:
                     if preds[i] == 1:
                         tile.save(imgtile_out)
+                        if multiple_region:
+                            coord_list.append([abs_col, abs_row])
 
             # Draw cross over corresponding patch section on tilecrossed image
             if self.input_slide.save_tilecrossed_image:
-                start_w = col * (tilecross_patchsize)
-                start_h = row * (tilecross_patchsize)
+                # if multiple_region:
+                #     start_w = msk_col * (tilecross_patchsize)
+                #     start_h = msk_row * (tilecross_patchsize)
+                # else:
+                #     start_w = col * (tilecross_patchsize)
+                #     start_h = row * (tilecross_patchsize)
+
+                start_w = tmp_col * (tilecross_patchsize)
+                start_h = tmp_row * (tilecross_patchsize)
 
                 # If we reach the edge of the image, we only can draw until the edge pixel
                 if (start_w + tilecross_patchsize) >= tilecrossed_img.size[0]:
@@ -551,10 +648,24 @@ class TileGenerator:
 
             # Jump to the next column tile
             col += 1
+            tmp_col += 1
+            if multiple_region:
+                abs_col += self.input_slide.output_downsample * self.input_slide.patch_size
 
             # If we reach the right edge of the image, jump to the next row
-            if col == grid_coord[0]:
-                col = 0
+            if tmp_col == grid_coord[0]:
+                # TODO: original commented out
+                # col = 0
+                tmp_col = 0
+                if multiple_region:
+                    i += dzg_selectedlevel_maxtilecoords[0] - 1 - col + col_init - 1
+                    col = col_init
+                    abs_col = x_coord
+                    abs_row += self.input_slide.output_downsample * self.input_slide.patch_size
+                else:
+                    col = 0
+
+                tmp_row += 1
                 row += 1
 
                 if self.input_slide.save_tilecrossed_image:
@@ -563,6 +674,8 @@ class TileGenerator:
 
             # Increase counter for metadata
             i += 1
+            if multiple_region:
+                name_idx += 1
 
         # Saving tilecrossed image
         if self.input_slide.save_tilecrossed_image:
@@ -575,6 +688,11 @@ class TileGenerator:
             patch_results.extend(list(zip(tile_names, tile_dims_w, tile_dims_h, preds, tile_rows, tile_cols)))
             patch_results_df = pd.DataFrame.from_records(patch_results, columns=["Tile", "Width", "Height", "Keep", "Row", "Column"])
             patch_results_df.to_csv(self.input_slide.img_outpath + "tile_selection.tsv", index=False, sep="\t")
+
+        # Save coordinate as numpy file
+        if multiple_region:
+            coord_path = self.input_slide.img_outpath + "/tiles_coord"
+            np.save(coord_path, coord_list)
 
         # Finishing
         te = time.time()

@@ -67,6 +67,30 @@ def build_parser():
         help='Show status messages at each step of the pipeline.',
         choices=["silent", "default", "verbose"],
         default="default")
+    group_exec.add_argument(
+        '--multi-reg',
+        action='store_true',
+        default=False,
+        help='Indicate whether there are multiple regions in the slide to extract.'
+    )
+    group_exec.add_argument(
+        '--reg-num',
+        type=int,
+        default=-1,
+        help='Integer indicating the region to extract. -1 if single region slide.'
+    )
+    group_exec.add_argument(
+        '--canny-low',
+        type=int,
+        default=100,
+        help='Integer indicating the lower threshold of Canny edge detector.'
+    )
+    group_exec.add_argument(
+        '--canny-high',
+        type=int,
+        default=200,
+        help='Integer indicating the higher threshold of Canny edge detector.'
+    )
 
     # Optional argument group: output
     group_output = parser.add_argument_group('General output')
