@@ -89,25 +89,29 @@ def downsample_image(slide, downsampling_factor, mode="numpy", multi_reg=False, 
 
     # Get the image at the requested scale
     # First tuple: (x, y), second: (width, height)
+    fourty_x = downsampling_factor == 1
     if multi_reg:
         svs_native_levelimg = slide.read_region((reg_param[0], reg_param[1]), 0, (reg_param[2], reg_param[3]))
-        target_size = (reg_param[2] // downsampling_factor, reg_param[3] // downsampling_factor)
+        if not fourty_x:
+            target_size = (reg_param[2] // downsampling_factor, reg_param[3] // downsampling_factor)
     else:
         svs_native_levelimg = slide.read_region((0, 0), best_downsampling_level,
                                                 slide.level_dimensions[best_downsampling_level])
-        target_size = tuple([int(x // downsampling_factor) for x in slide.dimensions])
+        if not fourty_x:
+            target_size = tuple([int(x // downsampling_factor) for x in slide.dimensions])
 
-    img = svs_native_levelimg.resize(target_size)
+    if not fourty_x:
+        svs_native_levelimg = svs_native_levelimg.resize(target_size)   # Orig: img = ...
 
     # By default, return a numpy array as RGB, otherwise, return PIL image
     if mode == "numpy":
         # Remove the alpha channel
-        img = np.array(img.convert("RGB"))
+        svs_native_levelimg = np.array(svs_native_levelimg.convert("RGB"))
 
     # To verify the intended region
-    cv2.imwrite("cropped.png", img)
+    # cv2.imwrite("cropped.png", svs_native_levelimg)
 
-    return img, best_downsampling_level
+    return svs_native_levelimg, best_downsampling_level
 
 
 def isPowerOfTwo(n):

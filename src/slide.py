@@ -1,3 +1,4 @@
+import PIL.Image
 import cv2
 import logging
 import numpy as np
@@ -600,6 +601,10 @@ class TileGenerator:
                     # imgtile_out = self.input_slide.tile_folder + f'{self.input_slide.sample_id}_{abs_col}_{abs_row}' + "." + self.input_slide.format
                 else:
                     imgtile_out = self.input_slide.tile_folder + tile_names[i] + "." + self.input_slide.format
+
+                # TODO: modify if needed. Specific usage
+                if self.input_slide.output_downsample == 1:
+                    tile = tile.resize((256, 256), resample=PIL.Image.BICUBIC)
 
                 if self.input_slide.save_blank:
                     tile.save(imgtile_out)
