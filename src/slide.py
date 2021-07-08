@@ -59,7 +59,10 @@ class PySlide:
             os.makedirs(self.output)
 
         # Create a folder for the sample
-        self.img_outpath = os.path.join(self.output + self.sample_id, '')
+        if self.multi_reg:
+            self.img_outpath = os.path.join(self.output + self.sample_id + '_R' + str(self.reg_num), '')
+        else:
+            self.img_outpath = os.path.join(self.output + self.sample_id, '')
         if not os.path.exists(self.img_outpath):
             os.makedirs(self.img_outpath)
 
@@ -67,7 +70,13 @@ class PySlide:
     def _create_tile_folder(self):
         """Creates a subfolder in the output folder to hold individual tiles."""
 
-        self.tile_folder = os.path.join(self.img_outpath + self.sample_id + "_tiles", '')
+        if self.tiles_output != 'output/':
+            if self.multi_reg:
+                self.tile_folder = os.path.join(self.tiles_output + self.sample_id + '_R' + str(self.reg_num) + "_tiles", '')
+            else:
+                self.tile_folder = os.path.join(self.tiles_output + self.sample_id + "_tiles", '')
+        else:
+            self.tile_folder = os.path.join(self.img_outpath + self.sample_id + "_tiles", '')
         if not os.path.exists(self.tile_folder):
             os.makedirs(self.tile_folder)
 
@@ -696,7 +705,7 @@ class TileGenerator:
 
         # Save coordinate as numpy file
         if multiple_region:
-            coord_path = self.input_slide.img_outpath + "/tiles_coord"
+            coord_path = self.input_slide.coord_output + self.input_slide.sample_id + '_R' + str(self.input_slide.reg_num) + '_tiles_coord'
             np.save(coord_path, coord_list)
 
         # Finishing

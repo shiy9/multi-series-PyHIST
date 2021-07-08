@@ -96,7 +96,17 @@ def build_parser():
     group_output = parser.add_argument_group('General output')
     group_output.add_argument(
         '--output',
-        help="Output directory",
+        help="Output directory for masks etc.",
+        type=str,
+        default="output/")
+    group_output.add_argument(
+        '--tiles-output',
+        help="Output directory for tiles",
+        type=str,
+        default="output/")
+    group_output.add_argument(
+        '--coord-output',
+        help="Output directory for coordinate file",
         type=str,
         default="output/")
     group_output.add_argument(
